@@ -1,0 +1,11 @@
+torch
+torchvision
+numpy
+tqdm
+einops
+opencv-python
+torch-fidelity
+Pillow
+tensorboard
+matplotlib
+ 
