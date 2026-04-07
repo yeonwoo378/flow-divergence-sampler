@@ -102,7 +102,6 @@ class Denoiser(nn.Module):
             t_next = timesteps[i + 1]
             if 'ours' in self.method:
                 z = stepper(z, t, t_next, labels, args=args, iter=args.iter, perturb=args.perturb_scale)
-                 # TODO: modify here with below
             else:
                 z = stepper(z, t, t_next, labels)
         # last step euler
@@ -254,7 +253,7 @@ class DenoiserCustom(Denoiser):
                 else:
                     raise NotImplementedError
                 delta_schedule = self.get_scheduled_value(1., t.mean().item(), schedule_type=args.perturb_schedule)
-                best_z, best_v_pred, improved, delta = self.divergence_stepper(v_func, 
+                best_z, best_v_pred, improved, delta = self.divergence_stepper(v_func,
                                             v_func_kwargs,
                                             x_key='z',
                                             t_key='t',
@@ -268,7 +267,6 @@ class DenoiserCustom(Denoiser):
                                             seed_eps=args.seed_eps,
                                             improved=improved,
                                             delta=delta,
-                                            sync_over_time=args.sync_over_time,
                                             num_delta=args.num_delta
                 )
                 # z = best_z + (t_next - t) * best_v_pred # z_next
@@ -319,13 +317,7 @@ class DenoiserCustom(Denoiser):
                            seed_eps=None,
                            delta=None,
                            improved=None,
-                           resample_delta=False,
-                           resample_eps=False,
-                           sequential_vjp=True,
                            sequential_hutchinson=True,
-                           eta=0.0,
-                           sync_over_time=False,
-                           divergence_dict=None
                            ):
         assert stop_t >= 0.0 and stop_t <= 1.0
 
@@ -336,7 +328,7 @@ class DenoiserCustom(Denoiser):
 
         if num_updates <= 0 or t > stop_t:
             return v_func_kwargs[x_key], v_func(**v_func_kwargs), improved, delta
-        # import ipdb; ipdb.set_trace()
+        
         z = v_func_kwargs[x_key]        
         B = z.shape[0]
         D = np.prod(z.shape[1:])  # C * H * W
@@ -345,265 +337,97 @@ class DenoiserCustom(Denoiser):
         eps_generator = None
         
         if seed_delta is not None:
-            if sync_over_time:
-                delta_generator = torch.Generator(device=z.device).manual_seed(seed_delta) # + int(t * 1000))
-            else:
-                delta_generator = torch.Generator(device=z.device).manual_seed(seed_delta + int(t * 1000))
+            delta_generator = torch.Generator(device=z.device).manual_seed(seed_delta + int(t * 1000))
         if seed_eps is not None:
             eps_generator = torch.Generator(device=z.device).manual_seed(seed_eps)
         sync_eps_with_delta = num_eps == 1 and seed_eps == seed_delta
         
         for update_idx in range(num_updates):
-            require_sample_delta = (update_idx == 0) or resample_delta
-            require_sample_eps = (update_idx == 0) or resample_eps
-
             # compute divergence and find the best perturbation
-            if sequential_vjp:
-                assert (not resample_delta) or (num_delta==1)
-                for delta_idx in range(num_delta+1):
+            for delta_idx in range(num_delta+1):
 
-                    # pass if no need to get the divergence of original z
-                    # if delta_idx == 0 and update_idx !=0: # buggy
-                    #     continue
-                    
-                    if delta is None or improved is None:
-                        assert improved is None and t == 0.0 and delta_idx <= 1
-                        delta = torch.randn(z.shape, generator=delta_generator, device=z.device) # if delta_idx != 0 else torch.zeros_like(z, device=z.device)
-                    elif update_idx > 0:
-                        temp_delta_generator = torch.Generator(device=z.device).manual_seed(seed_delta + update_idx)
-                        temp_delta = torch.randn(z.shape, generator=temp_delta_generator, device=z.device)
-                        pass
-                    elif delta_idx > 0:
-                        new_delta = torch.randn(z.shape, generator=delta_generator, device=z.device) #if delta_idx != 0 else torch.zeros_like(z, device=z.device)
-                        delta = torch.where(
-                            improved.reshape(-1, *([1]*(z.ndim-1))), # hard-coded shape
-                            delta, # True
-                            new_delta # False
-                        )
-                    # no update delta when delta_idx=0
-                    assert seed_delta != seed_eps, "Is a Biased Estimator"
+                if delta is None or improved is None:
+                    assert improved is None and t == 0.0 and delta_idx <= 1
+                    delta = torch.randn(z.shape, generator=delta_generator, device=z.device)
+                elif update_idx > 0:
+                    temp_delta_generator = torch.Generator(device=z.device).manual_seed(seed_delta + update_idx)
+                    temp_delta = torch.randn(z.shape, generator=temp_delta_generator, device=z.device)
+                    pass
+                elif delta_idx > 0:
+                    new_delta = torch.randn(z.shape, generator=delta_generator, device=z.device)
+                    delta = torch.where(
+                        improved.reshape(-1, *([1]*(z.ndim-1))), # hard-coded shape
+                        delta, # True
+                        new_delta # False
+                    )
+                # no update delta when delta_idx=0
+                assert seed_delta != seed_eps, "Is a Biased Estimator"
 
-                    if sync_eps_with_delta and delta_idx != 0:
-                        eps = delta.detach()
-                        raise NotImplementedError # not using anymore!
+                if sync_eps_with_delta and delta_idx != 0:
+                    eps = delta.detach()
+                    raise NotImplementedError # not using anymore!
+                else:
+                    eps = torch.randn(z.shape, generator=eps_generator, device=z.device)
 
-                    else:
-                        eps = torch.randn(z.shape, generator=eps_generator, device=z.device) 
-
-                    if delta_idx == 0:
-                        perturbed_z = z 
-                    elif update_idx == 0:
-                        perturbed_z = z + delta_scale * delta_scheduler(update_idx) * delta # TODO: clarify
-                    else:
-                        perturbed_z = z + delta_scale * delta_scheduler(update_idx) * temp_delta # TODO: clarify
-                    with torch.enable_grad():
-                        perturbed_z = perturbed_z.detach().requires_grad_(True)
-                        v_func_kwargs[x_key] = perturbed_z
-                        
-                        v_pred = v_func(**v_func_kwargs)  # [B, C, H, W]
-                        v_pred_eps = (v_pred * eps).flatten(1).sum(1)  # [B]
-                        grad_v = torch.autograd.grad(
-                            outputs=v_pred_eps,          # [B]
-                            inputs=perturbed_z,                      # [B, C, H, W]
-                            grad_outputs=torch.ones_like(v_pred_eps),  # [B]
-                            create_graph=False,
-                            retain_graph=False,         
-                        )[0].detach()  # [B, C, H, W]
-                        divergence = (grad_v * eps).flatten(1).sum(1) / D  # [B]
-                    
-                    threshold = - (1 / (1 - t))
-
-                    if delta_idx == 0:
-                        best_divergence = divergence.detach()
-                        best_v_pred = v_pred.detach()
-                        best_perturbed_z = perturbed_z.detach()
-                    elif update_idx == 0:
-                        improved = (divergence < (best_divergence - eta)) & (best_divergence >= threshold)
-                        # improved = (divergence >= (best_divergence - eta)) | (best_divergence < threshold)
-                        improved_shape = (B,) + (1,) * (len(z.shape) - 1)
-                        best_divergence = torch.where(improved, divergence, best_divergence)
-                        best_v_pred = torch.where(
-                            improved.view(improved_shape),
-                            v_pred,
-                            best_v_pred,
-                        )
-                        # print(improved.view(improved_shape).shape)
-                        best_perturbed_z = torch.where(
-                            improved.view(improved_shape),
-                            perturbed_z.detach(),
-                            best_perturbed_z,
-                        )
-                    else:
-                        temp_improved = (divergence < (best_divergence - eta)) & (best_divergence >= threshold)
-                        improved_shape = (B,) + (1,) * (len(z.shape) - 1)
-                        best_divergence = torch.where(temp_improved, divergence, best_divergence)
-                        best_v_pred = torch.where(
-                            temp_improved.view(improved_shape),
-                            v_pred,
-                            best_v_pred,
-                        )
-                        # print(improved.view(improved_shape).shape)
-                        best_perturbed_z = torch.where(
-                            temp_improved.view(improved_shape),
-                            perturbed_z.detach(),
-                            best_perturbed_z,
-                        )
-
-                        # improved = improved & temp_improved
-
-                # update iteration-wise
-                z = best_perturbed_z # update z
-                v_pred = best_v_pred
-            
-            # currently not using hereafter
-            else:
-                # build delta
-                raise NotImplementedError
-                if require_sample_delta:            
-                    delta_shape = (num_delta+1, ) + z.shape  # [num_delta, B, C, H, W]
-                    delta = torch.randn(delta_shape, generator=delta_generator, device=z.device, dtype=z.dtype)  # [num_delta, B, C, H, W]
-                    delta[0] = 0.0  # no perturbation for the first sample
-                
-                # build eps.
-                if require_sample_eps:
-                    if sync_eps_with_delta:
-                        eps = delta.unsqueeze(0)  # [1, num_delta * B, C, H, W]
-                        # eps = repeat(eps, '1 nd b ... -> (ne nd b) ...', ne=num_eps)
-                    else:
-                        eps_shape = (num_eps,) + z.shape  # [num_eps, B, C, H, W]
-                        eps = torch.randn(eps_shape, generator=eps_generator, device=z.device, dtype=z.dtype)  # [num_eps, B, C, H, W]
-                        # eps_shape = (num_eps, num_delta+1,) + z.shape # Tip: sample more and rearrange for independent eps.
-                
-                # expand v_func_kwargs
-                perturbed_z = z.unsqueeze(0) + delta_scale * delta_scheduler(t) * delta
-                perturbed_z = rearrange(perturbed_z, 'nd b ... -> (nd b) ...', nd=num_delta+1, b=B)
-                perturbed_z = perturbed_z.detach().requires_grad_(True)
-                
-                # compute v
-                with torch.enable_grad():            
+                if delta_idx == 0:
+                    perturbed_z = z
+                elif update_idx == 0:
+                    perturbed_z = z + delta_scale * delta_scheduler(update_idx) * delta # TODO: clarify
+                else:
+                    perturbed_z = z + delta_scale * delta_scheduler(update_idx) * temp_delta # TODO: clarify
+                with torch.enable_grad():
+                    perturbed_z = perturbed_z.detach().requires_grad_(True)
                     v_func_kwargs[x_key] = perturbed_z
-                    v_func_kwargs_expanded = expand_v_func_kwargs(v_func_kwargs, batch_size=B, expand_size=num_delta+1)
-                    v_pred_expanded = v_func(**v_func_kwargs_expanded)  # [(num_delta+1) * B, C, H, W]
 
-                    divergence = []
-                    if sequential_hutchinson:
-                        for eps_idx, eps_i in enumerate(eps):  # [B, C, H, W]
-                            retain_graph = (eps_idx < eps.shape[0] - 1) # retain graph except for the last one
-                            v_pred_eps = (v_pred_expanded * eps_i.unsqueeze(0)).flatten(1).sum(1)  # [(num_delta+1) * B]
-                            grad_v = torch.autograd.grad(
-                                outputs=v_pred_eps,          # [(num_delta+1) * B]
-                                inputs=perturbed_z,                      # [(num_delta+1) * B, C, H, W]
-                                grad_outputs=torch.ones_like(v_pred_eps),  # [(num_delta+1) * B]
-                                create_graph=False,
-                                retain_graph=retain_graph,         
-                            )[0].detach()  # [(num_delta+1) * B, C, H, W]
-                            
-                            divergence_i = (grad_v * eps_i.unsqueeze(0)).flatten(1).sum(1) / D  # [(num_delta+1) * B]
-                            divergence.append(divergence_i)
-                        divergence = torch.stack(divergence, dim=0)  # [num_eps, (num_delta+1) * B]
-                        divergence = divergence.mean(0)  # [(num_delta+1) * B]
-                    else:
-                        v_pred_eps = (v_pred_expanded.unsqueeze(0) * eps.flatten(1).unsqueeze(1)).flatten(2).sum(2)  # [num_eps, (num_delta+1) * B]
-                        grad_v = torch.autograd.grad(
-                            outputs=v_pred_eps,          # [num_eps, (num_delta+1) * B]
-                            inputs=perturbed_z,                      # [(num_delta+1) * B, C, H, W]
-                            grad_outputs=torch.ones_like(v_pred_eps),  # [num_eps, (num_delta+1) * B]
-                            create_graph=False,
-                            retain_graph=False,         
-                        )[0].detach()  # [(num_delta+1) * B, C, H, W]
-                        
-                        divergence = (grad_v.unsqueeze(0) * eps.flatten(1).unsqueeze(1)).flatten(2).sum(2) / D  # [num_eps, (num_delta+1) * B]
-                        divergence = divergence.mean(0)  # [(num_delta+1) * B]
-                # select the best perturbation based on divergence
-                divergence = divergence.view(num_delta+1, B)  # [num_delta+1, B]
-                best_divergence, best_idx = torch.min(divergence, dim=0)
-                best_perturbed_z = rearrange(perturbed_z, '(nd b) ... -> nd b ...', nd=num_delta+1, b=B)[best_idx, torch.arange(B)]  # [B, C, H, W]
-                best_v_pred = rearrange(v_pred_expanded, '(nd b) ... -> nd b ...', nd=num_delta+1, b=B)[best_idx, torch.arange(B)]  # [B, C, H, W]
-                z = best_perturbed_z.detach()
+                    v_pred = v_func(**v_func_kwargs)  # [B, C, H, W]
+                    v_pred_eps = (v_pred * eps).flatten(1).sum(1)  # [B]
+                    grad_v = torch.autograd.grad(
+                        outputs=v_pred_eps,          # [B]
+                        inputs=perturbed_z,                      # [B, C, H, W]
+                        grad_outputs=torch.ones_like(v_pred_eps),  # [B]
+                        create_graph=False,
+                        retain_graph=False,
+                    )[0].detach()  # [B, C, H, W]
+                    divergence = (grad_v * eps).flatten(1).sum(1) / D  # [B]
+
+                threshold = - (1 / (1 - t))
+
+                if delta_idx == 0:
+                    best_divergence = divergence.detach()
+                    best_v_pred = v_pred.detach()
+                    best_perturbed_z = perturbed_z.detach()
+                elif update_idx == 0:
+                    improved = (divergence < best_divergence) & (best_divergence >= threshold)
+                    improved_shape = (B,) + (1,) * (len(z.shape) - 1)
+                    best_divergence = torch.where(improved, divergence, best_divergence)
+                    best_v_pred = torch.where(
+                        improved.view(improved_shape),
+                        v_pred,
+                        best_v_pred,
+                    )
+                    best_perturbed_z = torch.where(
+                        improved.view(improved_shape),
+                        perturbed_z.detach(),
+                        best_perturbed_z,
+                    )
+                else:
+                    temp_improved = (divergence < best_divergence) & (best_divergence >= threshold)
+                    improved_shape = (B,) + (1,) * (len(z.shape) - 1)
+                    best_divergence = torch.where(temp_improved, divergence, best_divergence)
+                    best_v_pred = torch.where(
+                        temp_improved.view(improved_shape),
+                        v_pred,
+                        best_v_pred,
+                    )
+                    best_perturbed_z = torch.where(
+                        temp_improved.view(improved_shape),
+                        perturbed_z.detach(),
+                        best_perturbed_z,
+                    )
+
+            # update iteration-wise
+            z = best_perturbed_z # update z
+            v_pred = best_v_pred
         return best_perturbed_z, best_v_pred, improved, delta
     
 
-    # currently not using 
-    # @torch.enable_grad() 
-    # def _euler_step_ours(self, z, t, t_next, labels, args, iter=1, perturb=1e-2):
-    #     D = z.shape[1] * z.shape[2] * z.shape[3]
-    #     stop_t = args.stop_t
-
-    #     assert stop_t >= 0.0 and stop_t <= 1.0
-    #     best_z = z
-    #     best_divergence = None
-    #     best_v_pred = None
-        
-    #     # import ipdb; ipdb.set_trace()
-
-    #     assert len(z.shape) == 4
-
-    #     B = z.shape[0]
-
-    #     generator = torch.Generator(device=z.device).manual_seed(42)
-    #     noise = torch.randn(
-    #         z.shape,
-    #         generator=generator,
-    #         device=z.device,
-    #         dtype=z.dtype,
-    #     )
-    
-    #     if t.mean().item() > stop_t: # t > 0.5
-    #         iter = 0
-
-    #     for i in range(iter+1):
-    #         if i == 0:
-    #             perturbed_z = best_z.detach().requires_grad_(True)
-    #         else:
-    #             t_perturb_rate = self.get_scheduled_value(1.0, t.mean().item(), schedule_type=args.perturb_schedule)
-    #             n_perturb_rate = self.get_scheduled_value(1.0, (float(i) - 1.0) / float(iter), schedule_type=args.iter_schedule)
-    #             perturb_rate = t_perturb_rate * n_perturb_rate * perturb
-    #             # print(f"timestep: {t.mean().item()}, {t_perturb_rate} | iter: {i}, {n_perturb_rate} |")  
-    #             perturb_generator = torch.Generator(device=z.device).manual_seed(42 + i)
-    #             noise = torch.randn(
-    #                 z.shape,
-    #                 generator=perturb_generator,
-    #                 device=z.device,
-    #                 dtype=z.dtype,
-    #             )
-    #             perturbed_z = best_z + perturb_rate * noise
-    #             perturbed_z = perturbed_z.detach().requires_grad_(True)
-    #         v_pred = self._forward_sample(perturbed_z, t, labels)
-
-    #         # (v · ε) per-sample: [B]
-    #         v_pred_noise = (v_pred * noise).flatten(1).sum(1)  # [B]
-
-    #         grad_v = torch.autograd.grad(
-    #             outputs=v_pred_noise,          # [B]
-    #             inputs=perturbed_z,                      # [B,C,H,W]
-    #             grad_outputs=torch.ones_like(v_pred_noise),  # [B]
-    #             create_graph=False,
-    #             retain_graph=False,         
-    #         )[0]  # [B, C, H, W]
-
-    #         # Hutchinson trace estimator per-sample: [B]
-    #         divergence = (grad_v * noise).flatten(1).sum(1) / D  # [B]
-
-    #         if i == 0:
-    #             best_divergence = divergence.detach()
-    #             best_v_pred = v_pred.detach()
-    #             best_z = perturbed_z.detach()   
-    #         else:
-    #             # select the best perturbation based on divergence
-    #             # improved = divergence.abs() < best_divergence.abs()
-    #             improved = divergence < best_divergence
-    #             best_divergence = torch.where(improved, divergence, best_divergence)
-    #             best_v_pred = torch.where(
-    #                 improved.view(B, 1, 1, 1),
-    #                 v_pred,
-    #                 best_v_pred,
-    #             )
-    #             best_z = torch.where(
-    #                 improved.view(B, 1, 1, 1),
-    #                 perturbed_z.detach(),
-    #                 best_z,
-    #             )
-
-    #     # update
-    #     z_next = best_z + (t_next - t) * best_v_pred
-    #     return z_next

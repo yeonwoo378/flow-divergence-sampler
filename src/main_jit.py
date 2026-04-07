@@ -85,9 +85,7 @@ def get_args_parser():
     parser.add_argument('--evaluate_gen', action='store_true')
     parser.add_argument('--gen_bsz', type=int, default=256,
                         help='Generation batch size')
-    parser.add_argument('--sync_over_time', action='store_true', default=False)
-    
-    # ours 
+    # ours
     parser.add_argument('--iter', default=1, type=int, help='num itereation of our divergence optimization for each timesteps') # N
     parser.add_argument('--perturb_scale', default=1e-2, type=float, help='scale to perturb the particles')
     parser.add_argument('--perturb_schedule', default='linear', choices=['constant', 'linear', 'cosine', 'concave', 'convex']) # T axis
@@ -97,7 +95,6 @@ def get_args_parser():
     parser.add_argument('--seed_eps', type=float, default=1234)
     parser.add_argument('--num_delta', type=int, default=1)
     parser.add_argument('--gen_path', type=str, default=None)
-    parser.add_argument('--check_time', action='store_true')
     parser.add_argument('--class_idx', type=int, default=-1)
 
     # dataset

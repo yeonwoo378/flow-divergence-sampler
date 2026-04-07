@@ -123,7 +123,6 @@ def evaluate(model_without_ddp, args, epoch, batch_size=64, log_writer=None):
         assert args.num_images % class_num == 0, "Number of images per class must be the same"
         # class_label_gen_world = np.arange(0, class_num).repeat(args.num_images // class_num)
         # class_label_gen_world = np.hstack([class_label_gen_world, np.zeros(50000)])
-        times = []
         for i in range(num_steps):
             print("Generation step {}/{}".format(i, num_steps))
 
@@ -139,12 +138,6 @@ def evaluate(model_without_ddp, args, epoch, batch_size=64, log_writer=None):
             end_time = time.time()
             elpased_time = end_time - start_time
             
-            if i!=0 and args.check_time:
-                print('elpased time: ', elpased_time)
-                times.append(elpased_time)
-            if args.check_time and i==64:
-                print('avg gen time', sum(times)/len(times))
-                break
 
             torch.distributed.barrier()
 
