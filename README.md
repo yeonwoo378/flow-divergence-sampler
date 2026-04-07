@@ -11,7 +11,7 @@
 
 **KAIST**
 
-[![Paper](https://img.shields.io/badge/arXiv-2604.?????-b31b1b.svg)](https://arxiv.org/abs/?)
+[![Paper](https://img.shields.io/badge/arXiv-2604.04646-b31b1b.svg)](https://arxiv.org/abs/2604.04646)
 [![Project Page](https://img.shields.io/badge/Project-Page-blue.svg)](https://yeonwoo378.github.io/official_fds)
 
 </div>
@@ -92,11 +92,14 @@ This repository builds upon the following excellent open-source projects:
 If you find this work helpful, please cite:
 
 ```bibtex
-@misc{cha2026fds,
-  title   = {Training-Free Refinement of Flow Matching with Divergence-based Sampling},
-  author  = {Cha, Yeonwoo and Yoo, Jaehoon and Kim, Semin and Park, Yunseo and Kwon, Jinhyeon and Hong, Seunghoon},
-  journal = {arXiv preprint arXiv:2604.?????},
-  year    = {2026}
+@misc{cha2026trainingfreerefinementflowmatching,
+      title={Training-Free Refinement of Flow Matching with Divergence-based Sampling}, 
+      author={Yeonwoo Cha and Jaehoon Yoo and Semin Kim and Yunseo Park and Jinhyeon Kwon and Seunghoon Hong},
+      year={2026},
+      eprint={2604.04646},
+      archivePrefix={arXiv},
+      primaryClass={cs.CV},
+      url={https://arxiv.org/abs/2604.04646}, 
 }
 ```
 
