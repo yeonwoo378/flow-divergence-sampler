@@ -1,4 +1,4 @@
-# Training-Free Refinement of Flow Matching with Divergence-based Sampling
+# Training-Free Refinement of Flow Matching with Divergence-based Sampling (ECCV 2026)
 
 <div align="center">
 
